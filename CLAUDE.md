@@ -103,7 +103,7 @@ Record the outcome in the design doc when settled.
 - How eval tickets reach the `tickets` table (seed vs harness), and seed dates relative to `FROZEN_NOW`. Decide before writing the seed.
 - MCP SDK support for spec 2026-07-28 (`input_required`, `server/discover`); fall back to 2025-11-25 if needed.
 
-Settled (not yet written back to the design doc):
+Settled (recorded in the design doc, Nov 22):
 - Status columns: `VARCHAR` + `CHECK`, not Postgres `ENUM`.
 - Case store: a second database (`cases`) in the same Postgres container, with its own role.
 - Identity columns instead of `BIGSERIAL`; extra order-timestamp CHECKs; `refunds.rule` limited to R1–R5 by CHECK; indexes on lookup foreign keys.
