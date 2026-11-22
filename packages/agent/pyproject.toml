@@ -1,0 +1,14 @@
+[project]
+name = "agent"
+version = "0.1.0"
+description = "Claude support agent that resolves Hearth & Kettle refund tickets through the MCP server, with a human approval gate"
+readme = "README.md"
+authors = [
+    { name = "Nikhil Chigali", email = "nikhil.chigali@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
