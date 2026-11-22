@@ -15,7 +15,20 @@ The design doc is the source of truth: **Support Desk MCP — Build Spec** (http
 
 ## Status
 
-Early scaffolding. `packages/{store,mcp_server,agent}`, `docs/` and `evals/` are empty; `pyproject.toml`, `docker-compose.yml` and `justfile` are empty placeholders. Current work: Phase 0–1 (workspace, Postgres via docker compose, store models, Alembic migration 0001, seed).
+Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile. Next: seed script, then policy code and the REST API. `mcp_server`, `agent`, `docs/` and `evals/` are still empty.
+
+## Local database
+
+`just up` starts Postgres 18 on `localhost:5432`. The superuser comes from a gitignored `.env` (keys in `.env.example`) and is only used by the init script and `just psql`. `docker/postgres/init/01-databases.sql` runs once, on a fresh volume (`just reset-db` to re-run it), and creates:
+
+| Database | Role (password = role name, dev only) | Use |
+|---|---|---|
+| `store` | `store_app` | store dev data |
+| `store_test` | `store_app` | tests and `just migration-check` — may be wiped at any time |
+| `cases` | `cases_app` | MCP server case store |
+| `cases_test` | `cases_app` | its throwaway twin |
+
+`CONNECT` is revoked from `PUBLIC`, so each role can open only its own databases — the boundary rule holds at the database level too. The store reads its URL from `STORE_DATABASE_URL` (pydantic-settings, `store/db.py`); the default is the dev `store` database. Alembic's `env.py` uses the same setting, so pointing `STORE_DATABASE_URL` at `store_test` retargets migrations too.
 
 ## Architecture
 
@@ -44,32 +57,38 @@ Where responsibilities live:
 - Tickets have no `customer_id`/`order_id` on purpose — resolving who and which order is the agent's job.
 - API errors use one envelope `{"error": {"code", "message", "details"}}`; codes map one-to-one to the MCP server's `isError` messages.
 - Store API: base path `/v1`, `X-API-Key` on everything except `/health`.
+- Status columns are Python `StrEnum`s stored as `VARCHAR(32)` + `CHECK` via `text_enum()` in `store/models.py` — never Postgres `ENUM`. Adding a value is a constraint swap in a migration.
+- `Base.metadata` has a naming convention (`ck_<table>_<name>`, `fk_…`, `ix_…`); always give `CheckConstraint` a short `name=` so migrations can drop/replace it by name.
+- DB-side defaults use `server_default`, so raw-SQL writers (seed, eval reset) get them too.
 
 ## Database migrations (Alembic, SQLAlchemy 2.0)
 
 - One Alembic setup per database: `packages/store/alembic/` and `packages/mcp_server/alembic/`, each with its own version table. Never share a migration history across them.
-- Autogenerate is a first draft only. It misses `CHECK` constraints (add with `op.create_check_constraint`), the `lower(name)` expression index, and enum value changes. Review every generated file.
-- The Store design SQL becomes migration 0001; after that, migrations are the schema's source of truth.
+- Run Alembic from `packages/store` (`cd packages/store && uv run alembic ...`). New revision: `uv run alembic revision --autogenerate --rev-id 0002 -m "..."`; ruff formats and lints it via post-write hooks.
+- Autogenerate is a first draft only. For a new table it does include CHECK constraints and the `lower(name)` expression index; it does **not** detect a CHECK added to or changed on an existing table (write `op.drop_constraint` / `op.create_check_constraint` by hand). Review every generated file.
+- Migration 0001 is the Store design SQL as models; migrations are now the schema's source of truth.
+- `just migration-check` must pass before committing a migration.
 - Eval resets never touch the schema: `TRUNCATE ... RESTART IDENTITY CASCADE` + reseed.
 
 ## Commands
 
-Planned in the design doc; the justfile is still empty, so adjust paths once code exists. `just` with no args lists recipes.
+`just` with no args lists recipes.
 
 ```
-just up                # docker compose up -d (postgres + store + mcp server)
-just migrate           # alembic upgrade head for store and mcp_server
-just migration-check   # alembic check + downgrade base/upgrade head; destroys data — throwaway DB only
-just seed              # uv run python -m store.seed
-just test              # uv run pytest packages
-just lint              # ruff check . && lint-imports
-just serve-store       # uvicorn store.api:app --reload
-just inspect           # MCP Inspector against the server over stdio
-just agent             # uv run python -m agent.cli
-just eval <args>       # uv run python -m evals.run
+just up                # start Postgres and wait until healthy
+just down              # stop it (data kept)
+just reset-db          # wipe the volume, re-run the init script, migrate (asks first)
+just psql [db]         # psql in the container; db defaults to store
+just migrate           # alembic upgrade head on the dev store database
+just migration-check   # on store_test only: base → head → alembic check → base → head
+just lint              # ruff check + ruff format --check + lint-imports
+just fmt               # ruff format + ruff check --fix
+just test [args]       # uv run pytest packages [args]; exits 5 until tests exist
 ```
 
-Single test: `uv run pytest packages/store/tests/test_policy.py::test_name`.
+Single test: `just test packages/store/tests/test_policy.py::test_name`.
+
+Planned recipes from the design doc, added when their code exists: `seed`, `serve-store`, `inspect` (MCP Inspector), `agent`, `eval`. `migrate` and `migration-check` gain `mcp_server` lines once the case store has its own Alembic setup.
 
 ## Evals
 
@@ -80,8 +99,11 @@ Single test: `uv run pytest packages/store/tests/test_policy.py::test_name`.
 ## Open decisions
 
 Record the outcome in the design doc when settled.
-- Status columns: Postgres `ENUM` vs `TEXT` + `CHECK` (leaning `TEXT` + `CHECK`; must decide before migration 0001).
-- R7 scope: per refund row, per item total, or per case (the DB check is per row; split refunds or multi-item cancels can slip past it).
-- Case store: a second database in the same Postgres container (proposed) vs SQLite.
-- How eval tickets reach the `tickets` table (seed vs harness), and seed dates relative to `FROZEN_NOW`.
+- R7 scope: per refund row, per item total, or per case (the DB check is per row; split refunds or multi-item cancels can slip past it). Decide before writing `policy.py`.
+- How eval tickets reach the `tickets` table (seed vs harness), and seed dates relative to `FROZEN_NOW`. Decide before writing the seed.
 - MCP SDK support for spec 2026-07-28 (`input_required`, `server/discover`); fall back to 2025-11-25 if needed.
+
+Settled (not yet written back to the design doc):
+- Status columns: `VARCHAR` + `CHECK`, not Postgres `ENUM`.
+- Case store: a second database (`cases`) in the same Postgres container, with its own role.
+- Identity columns instead of `BIGSERIAL`; extra order-timestamp CHECKs; `refunds.rule` limited to R1–R5 by CHECK; indexes on lookup foreign keys.
