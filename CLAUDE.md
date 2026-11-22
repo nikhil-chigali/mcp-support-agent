@@ -15,7 +15,7 @@ The design doc is the source of truth: **Support Desk MCP — Build Spec** (http
 
 ## Status
 
-Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile. Next: seed script, then policy code and the REST API. `mcp_server`, `agent`, `docs/` and `evals/` are still empty.
+Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile. Next: seed script, then policy code and the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
 
 ## Local database
 
@@ -92,7 +92,7 @@ Planned recipes from the design doc, added when their code exists: `seed`, `serv
 
 ## Evals
 
-- `evals/tickets/dev.jsonl` holds the 40 tuning tickets. **The 10 holdout tickets must stay out of the repo** (gitignored file or private gist) — never read or add them.
+- `evals/tickets/dev.jsonl` holds the 40 tuning tickets. The 10 holdout tickets stay out of the repo (gitignored file or private gist), and are never read or added: they are the check against overfitting the prompt to the dev set, so any look at them during tuning spoils them.
 - Grading of outcome and amount is deterministic, from the case records; only reply text goes to an LLM judge.
 - After any change to the agent prompt or tool descriptions: rerun the full set and commit the scores in `evals/results/` alongside the change.
 
