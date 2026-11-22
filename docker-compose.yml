@@ -1,0 +1,28 @@
+name: mcp-support-agent
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      # Localhost only: nothing outside this machine can reach the database.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Postgres 18+ images keep data under /var/lib/postgresql/<major>/docker,
+      # so the volume mounts one level up from the old .../data path.
+      - pgdata:/var/lib/postgresql
+      # Runs once, on the first start with an empty volume.
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # -h 127.0.0.1 forces a TCP check. During first-start init the server
+      # listens only on its Unix socket, so this passes only once init is done.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
