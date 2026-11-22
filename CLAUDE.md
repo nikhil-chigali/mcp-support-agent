@@ -15,7 +15,7 @@ The design doc is the source of truth: **Support Desk MCP — Build Spec** (http
 
 ## Status
 
-Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile. Next: seed script, then policy code and the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
+Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile, schema smoke tests, CI with a required check on `main`. Next: pre-commit and Claude Code hooks, then the seed script, then policy code and the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
 
 ## Local database
 
@@ -83,12 +83,19 @@ just migrate           # alembic upgrade head on the dev store database
 just migration-check   # on store_test only: base → head → alembic check → base → head
 just lint              # ruff check + ruff format --check + lint-imports
 just fmt               # ruff format + ruff check --fix
-just test [args]       # uv run pytest packages [args]; exits 5 until tests exist
+just test [args]       # uv run pytest packages [args]
 ```
 
 Single test: `just test packages/store/tests/test_policy.py::test_name`.
 
 Planned recipes from the design doc, added when their code exists: `seed`, `serve-store`, `inspect` (MCP Inspector), `agent`, `eval`. `migrate` and `migration-check` gain `mcp_server` lines once the case store has its own Alembic setup.
+
+## CI and branch rules
+
+`.github/workflows/ci.yml` runs one job, `check`, on every PR and on pushes to `main`: `uv sync` (with `UV_LOCKED=1`, so a stale `uv.lock` fails), `just lint`, `just test`, `just up` (a fresh Postgres runs the init script), `just migration-check`. Reproduce a failure locally with the same recipes; read CI logs with `gh run view --log-failed`.
+
+- Actions are pinned to full commit SHAs with a version comment. `astral-sh/setup-uv` publishes no floating major tag, so `@v10` doesn't resolve.
+- A ruleset on `main` blocks direct pushes, force-pushes and deletion, and requires a PR whose `check` passed on a branch up to date with `main`. Work on a branch. If the job is renamed, update the required check in the ruleset too, or PRs will wait forever.
 
 ## Evals
 

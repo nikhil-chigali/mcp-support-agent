@@ -1,0 +1,59 @@
+# Runs on `git commit`, against the staged files only. Keep it fast: anything
+# slow or needing a database (tests, migration-check) belongs in CI.
+# Run every hook on the whole repo: `uv run pre-commit run --all-files`.
+
+repos:
+  # Generic file hygiene, from the pre-commit project itself.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # Project tools, run through uv so they are the exact versions in uv.lock,
+  # the same ones `just lint` and CI use. No second version pin to drift.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (with safe fixes)
+        entry: uv run --frozen ruff check --fix
+        language: unsupported
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen ruff format
+        language: unsupported
+        types_or: [python, pyi]
+      - id: lint-imports
+        name: import-linter (package boundaries)
+        entry: uv run --frozen lint-imports
+        language: unsupported
+        types: [python]
+        pass_filenames: false
+      - id: uv-lock-check
+        name: uv.lock matches pyproject.toml
+        entry: uv lock --check
+        language: unsupported
+        files: (^|/)(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+
+  # Files that must never be committed, even with `git add -f`.
+  - repo: local
+    hooks:
+      - id: forbid-env-files
+        name: no .env files
+        entry: .env holds real credentials. Unstage it (git restore --staged <file>); only .env.example is committed.
+        language: fail
+        files: (^|/)\.env(\..+)?$
+        exclude: (^|/)\.env\.example$
+      - id: forbid-holdout-tickets
+        name: no holdout eval tickets
+        entry: Holdout tickets never enter the repo; they are the check against overfitting. Unstage and delete the file.
+        language: fail
+        files: ^evals/tickets/holdout
