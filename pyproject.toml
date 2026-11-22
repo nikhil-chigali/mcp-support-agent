@@ -1,0 +1,55 @@
+[project]
+name = "mcp-support-agent"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "agent",
+    "mcp-server",
+    "store",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/*",
+]
+
+[tool.uv.sources]
+store = { workspace = true }
+mcp-server = { workspace = true }
+agent = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["store", "mcp_server", "agent"]
+
+[tool.importlinter]
+root_packages = ["store", "mcp_server", "agent"]
+
+[[tool.importlinter.contracts]]
+name = "MCP server reaches the store only over HTTP"
+type = "forbidden"
+source_modules = ["mcp_server"]
+forbidden_modules = ["store"]
+
+[[tool.importlinter.contracts]]
+name = "Agent reaches the store only through the MCP server"
+type = "forbidden"
+source_modules = ["agent"]
+forbidden_modules = ["mcp_server", "store"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages"]
+addopts = ["--import-mode=importlib"]
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.17",
+    "pytest>=9.2.0",
+    "ruff>=0.17.6",
+]

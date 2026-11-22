@@ -1,0 +1,14 @@
+[project]
+name = "mcp-server"
+version = "0.1.0"
+description = "MCP server wrapping the Hearth & Kettle store's REST API: support tools, resources and prompts, plus its own case store"
+readme = "README.md"
+authors = [
+    { name = "Nikhil Chigali", email = "nikhil.chigali@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
