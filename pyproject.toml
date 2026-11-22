@@ -25,6 +25,9 @@ target-version = "py314"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["store", "mcp_server", "agent"]
+
 [tool.importlinter]
 root_packages = ["store", "mcp_server", "agent"]
 
@@ -40,6 +43,9 @@ type = "forbidden"
 source_modules = ["agent"]
 forbidden_modules = ["mcp_server", "store"]
 
+[tool.pytest.ini_options]
+testpaths = ["packages"]
+addopts = ["--import-mode=importlib"]
 
 [dependency-groups]
 dev = [

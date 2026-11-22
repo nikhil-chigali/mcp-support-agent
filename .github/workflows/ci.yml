@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_LOCKED: "1"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: "1"
+      - name: Install dependencies
+        run: uv sync
+      - name: Lint
+        run: just lint
+      - name: Test
+        run: just test
+      - name: Start Postgres
+        run: just up
+      - name: Migration check
+        run: just migration-check
