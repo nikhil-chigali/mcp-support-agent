@@ -92,7 +92,9 @@ Planned recipes from the design doc, added when their code exists: `seed`, `serv
 
 ## CI and branch rules
 
-`.github/workflows/ci.yml` runs one job, `check`, on every PR and on pushes to `main`: `uv sync` (with `UV_LOCKED=1`, so a stale `uv.lock` fails), `just lint`, `just test`, `just up` (a fresh Postgres runs the init script), `just migration-check`. Reproduce a failure locally with the same recipes; read CI logs with `gh run view --log-failed`.
+`.pre-commit-config.yaml` runs on every `git commit`, on staged files only: file hygiene (whitespace, final newline, YAML/TOML syntax, merge markers, large files, private keys), ruff check --fix and ruff format, lint-imports, `uv lock --check`, and hard blocks on `.env*` (except `.env.example`) and `evals/tickets/holdout*`. Ruff and import-linter run via `uv run --frozen`, so their versions come from `uv.lock`, not from the hook config. A fixer that changes a file fails the commit: re-stage and commit again. Install once per clone with `uv run pre-commit install`. No tests or DB checks here; those are CI's.
+
+`.github/workflows/ci.yml` runs one job, `check`, on every PR and on pushes to `main`: `uv sync` (with `UV_LOCKED=1`, so a stale `uv.lock` fails), `pre-commit run --all-files`, `just lint`, `just test`, `just up` (a fresh Postgres runs the init script), `just migration-check`. Reproduce a failure locally with the same recipes; read CI logs with `gh run view --log-failed`.
 
 - Actions are pinned to full commit SHAs with a version comment. `astral-sh/setup-uv` publishes no floating major tag, so `@v10` doesn't resolve.
 - A ruleset on `main` blocks direct pushes, force-pushes and deletion, and requires a PR whose `check` passed on a branch up to date with `main`. Work on a branch. If the job is renamed, update the required check in the ruleset too, or PRs will wait forever.
