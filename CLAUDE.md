@@ -15,7 +15,7 @@ The design doc is the source of truth: **Support Desk MCP — Build Spec** (http
 
 ## Status
 
-Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile. Next: seed script, then policy code and the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
+Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile, schema smoke tests, CI with a required check on `main`. Next: pre-commit and Claude Code hooks, then the seed script, then policy code and the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
 
 ## Local database
 
@@ -83,12 +83,31 @@ just migrate           # alembic upgrade head on the dev store database
 just migration-check   # on store_test only: base → head → alembic check → base → head
 just lint              # ruff check + ruff format --check + lint-imports
 just fmt               # ruff format + ruff check --fix
-just test [args]       # uv run pytest packages [args]; exits 5 until tests exist
+just test [args]       # uv run pytest packages [args]
 ```
 
 Single test: `just test packages/store/tests/test_policy.py::test_name`.
 
 Planned recipes from the design doc, added when their code exists: `seed`, `serve-store`, `inspect` (MCP Inspector), `agent`, `eval`. `migrate` and `migration-check` gain `mcp_server` lines once the case store has its own Alembic setup.
+
+## CI and branch rules
+
+`.pre-commit-config.yaml` runs on every `git commit`, on staged files only: file hygiene (whitespace, final newline, YAML/TOML syntax, merge markers, large files, private keys), ruff check --fix and ruff format, lint-imports, `uv lock --check`, and hard blocks on `.env*` (except `.env.example`) and `evals/tickets/holdout*`. Ruff and import-linter run via `uv run --frozen`, so their versions come from `uv.lock`, not from the hook config. A fixer that changes a file fails the commit: re-stage and commit again. Install once per clone with `uv run pre-commit install`. No tests or DB checks here; those are CI's.
+
+`.github/workflows/ci.yml` runs one job, `check`, on every PR and on pushes to `main`: `uv sync` (with `UV_LOCKED=1`, so a stale `uv.lock` fails), `pre-commit run --all-files`, `just lint`, `just test`, `just up` (a fresh Postgres runs the init script), `just migration-check`. Reproduce a failure locally with the same recipes; read CI logs with `gh run view --log-failed`.
+
+- Actions are pinned to full commit SHAs with a version comment. `astral-sh/setup-uv` publishes no floating major tag, so `@v10` doesn't resolve.
+- A ruleset on `main` blocks direct pushes, force-pushes and deletion, and requires a PR whose `check` passed on a branch up to date with `main`. Work on a branch. If the job is renamed, update the required check in the ruleset too, or PRs will wait forever.
+
+## Claude Code hooks
+
+Configured in `.claude/settings.json`; scripts in `.claude/hooks/` (stdlib Python, run with `python3`). Review or toggle them with `/hooks`.
+
+- **Guard (PreToolUse, Bash):** `guard_bash.py` denies commands that read `.env`, touch `evals/tickets/holdout*`, run `alembic downgrade` without `store_test`, `docker compose down -v`, `just reset-db`, or `DROP ...`. The deny reason tells Claude what to do instead; ask the user for those actions. `onFailure: block` makes a crashing guard fail closed. File tools are covered separately by `permissions.deny` (`.env`, holdout).
+- **Format on edit (PostToolUse, Edit|Write):** `format_python.py` runs `ruff format` and import sorting on the edited `.py` file. Not full `ruff check --fix`, which would delete an import added one edit before its first use.
+- **Stop gate (Stop):** `stop_gate.py` runs `just lint` and `just test -q` when the working tree is dirty; a failure blocks the end of the turn and feeds the output back. If it fails again while already continuing (`stop_hook_active`), it hands over to the user instead of looping. Keep it fast: no database checks.
+
+These guards stop mistakes, not a determined command; CI and the `main` ruleset are the backstop.
 
 ## Evals
 

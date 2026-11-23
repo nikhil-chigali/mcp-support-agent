@@ -224,3 +224,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Holdout eval tickets: never committed (see CLAUDE.md, Evals)
+evals/tickets/holdout*
