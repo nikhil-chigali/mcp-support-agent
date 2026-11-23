@@ -99,6 +99,16 @@ Planned recipes from the design doc, added when their code exists: `seed`, `serv
 - Actions are pinned to full commit SHAs with a version comment. `astral-sh/setup-uv` publishes no floating major tag, so `@v10` doesn't resolve.
 - A ruleset on `main` blocks direct pushes, force-pushes and deletion, and requires a PR whose `check` passed on a branch up to date with `main`. Work on a branch. If the job is renamed, update the required check in the ruleset too, or PRs will wait forever.
 
+## Claude Code hooks
+
+Configured in `.claude/settings.json`; scripts in `.claude/hooks/` (stdlib Python, run with `python3`). Review or toggle them with `/hooks`.
+
+- **Guard (PreToolUse, Bash):** `guard_bash.py` denies commands that read `.env`, touch `evals/tickets/holdout*`, run `alembic downgrade` without `store_test`, `docker compose down -v`, `just reset-db`, or `DROP ...`. The deny reason tells Claude what to do instead; ask the user for those actions. `onFailure: block` makes a crashing guard fail closed. File tools are covered separately by `permissions.deny` (`.env`, holdout).
+- **Format on edit (PostToolUse, Edit|Write):** `format_python.py` runs `ruff format` and import sorting on the edited `.py` file. Not full `ruff check --fix`, which would delete an import added one edit before its first use.
+- **Stop gate (Stop):** `stop_gate.py` runs `just lint` and `just test -q` when the working tree is dirty; a failure blocks the end of the turn and feeds the output back. If it fails again while already continuing (`stop_hook_active`), it hands over to the user instead of looping. Keep it fast: no database checks.
+
+These guards stop mistakes, not a determined command; CI and the `main` ruleset are the backstop.
+
 ## Evals
 
 - `evals/tickets/dev.jsonl` holds the 40 tuning tickets. The 10 holdout tickets stay out of the repo (gitignored file or private gist), and are never read or added: they are the check against overfitting the prompt to the dev set, so any look at them during tuning spoils them.
