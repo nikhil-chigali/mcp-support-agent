@@ -21,6 +21,8 @@ jobs:
       UV_LOCKED: "1"
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      # Database tests fail instead of skipping when Postgres is missing.
+      STORE_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
@@ -37,9 +39,9 @@ jobs:
         run: uv run pre-commit run --all-files --show-diff-on-failure
       - name: Lint
         run: just lint
-      - name: Test
-        run: just test
       - name: Start Postgres
         run: just up
       - name: Migration check
         run: just migration-check
+      - name: Test
+        run: just test

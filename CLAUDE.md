@@ -15,7 +15,7 @@ The design doc is the source of truth: **Support Desk MCP — Build Spec** (http
 
 ## Status
 
-Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile, schema smoke tests, CI with a required check on `main`. Next: pre-commit and Claude Code hooks, then the seed script, then policy code and the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
+Phase 1 (store backend), database part. Done: uv workspace with all three packages (only `store` has code), Postgres via docker compose, store models (`store/models.py`), Alembic migration 0001, justfile, schema smoke tests, CI with a required check on `main`, pre-commit and Claude Code hooks, the seed (`store/seed/`). Next: settle R7 scope, then `policy.py` with R1–R8 tests, then the REST API. `mcp_server` and `agent` are empty package skeletons; `docs/` and `evals/` are empty.
 
 ## Local database
 
@@ -59,7 +59,16 @@ Where responsibilities live:
 - Store API: base path `/v1`, `X-API-Key` on everything except `/health`.
 - Status columns are Python `StrEnum`s stored as `VARCHAR(32)` + `CHECK` via `text_enum()` in `store/models.py` — never Postgres `ENUM`. Adding a value is a constraint swap in a migration.
 - `Base.metadata` has a naming convention (`ck_<table>_<name>`, `fk_…`, `ix_…`); always give `CheckConstraint` a short `name=` so migrations can drop/replace it by name.
-- DB-side defaults use `server_default`, so raw-SQL writers (seed, eval reset) get them too.
+- DB-side defaults use `server_default`, so raw-SQL writers (seed, eval reset) get them too. But a `now()` default stamps the real clock, so anything written as of the frozen time (the seed) sets every timestamp explicitly.
+
+## Seed
+
+`store/seed/` builds a deterministic world: 40 customers, 120 orders. `scenarios.py` holds the catalog and about 20 hand-written scenario orders, each sitting at a policy boundary (day 30/31, day 90/91, $49.99/$50.00, $200.00, R4 overdue 9/10 days, prior refunds for R8, three Janes). `filler.py` adds background rows from a fixed random seed (no Faker).
+
+- Every date is an offset from `ANCHOR` (2026-06-01 12:00 UTC), which eval runs pin as `FROZEN_NOW`. Never use the real clock in seed data.
+- Scenario rows are inserted first after `RESTART IDENTITY`, so their ids never change. Eval tickets are written against them: treat `scenarios.py` like an API, and update the tickets that use a scenario when you change it.
+- The seed holds the world only, never tickets. The eval harness sends each run's tickets through `POST /v1/admin/reset`, so the store never reads `evals/` and the expected answers never reach the database.
+- `just seed` wipes the dev database and prints where each scenario landed (order id, email).
 
 ## Database migrations (Alembic, SQLAlchemy 2.0)
 
@@ -80,6 +89,7 @@ just down              # stop it (data kept)
 just reset-db          # wipe the volume, re-run the init script, migrate (asks first)
 just psql [db]         # psql in the container; db defaults to store
 just migrate           # alembic upgrade head on the dev store database
+just seed              # wipe the dev database and load the seed world
 just migration-check   # on store_test only: base → head → alembic check → base → head
 just lint              # ruff check + ruff format --check + lint-imports
 just fmt               # ruff format + ruff check --fix
@@ -88,13 +98,15 @@ just test [args]       # uv run pytest packages [args]
 
 Single test: `just test packages/store/tests/test_policy.py::test_name`.
 
-Planned recipes from the design doc, added when their code exists: `seed`, `serve-store`, `inspect` (MCP Inspector), `agent`, `eval`. `migrate` and `migration-check` gain `mcp_server` lines once the case store has its own Alembic setup.
+Database tests use the `test_engine` fixture (`packages/store/tests/conftest.py`): it migrates `store_test` to head and skips when Postgres is down. CI sets `STORE_REQUIRE_DB=1`, which turns that skip into a failure.
+
+Planned recipes from the design doc, added when their code exists: `serve-store`, `inspect` (MCP Inspector), `agent`, `eval`. `migrate` and `migration-check` gain `mcp_server` lines once the case store has its own Alembic setup.
 
 ## CI and branch rules
 
 `.pre-commit-config.yaml` runs on every `git commit`, on staged files only: file hygiene (whitespace, final newline, YAML/TOML syntax, merge markers, large files, private keys), ruff check --fix and ruff format, lint-imports, `uv lock --check`, and hard blocks on `.env*` (except `.env.example`) and `evals/tickets/holdout*`. Ruff and import-linter run via `uv run --frozen`, so their versions come from `uv.lock`, not from the hook config. A fixer that changes a file fails the commit: re-stage and commit again. Install once per clone with `uv run pre-commit install`. No tests or DB checks here; those are CI's.
 
-`.github/workflows/ci.yml` runs one job, `check`, on every PR and on pushes to `main`: `uv sync` (with `UV_LOCKED=1`, so a stale `uv.lock` fails), `pre-commit run --all-files`, `just lint`, `just test`, `just up` (a fresh Postgres runs the init script), `just migration-check`. Reproduce a failure locally with the same recipes; read CI logs with `gh run view --log-failed`.
+`.github/workflows/ci.yml` runs one job, `check`, on every PR and on pushes to `main`: `uv sync` (with `UV_LOCKED=1`, so a stale `uv.lock` fails), `pre-commit run --all-files`, `just lint`, `just up` (a fresh Postgres runs the init script), `just migration-check`, `just test` (with Postgres up, so database tests run). Reproduce a failure locally with the same recipes; read CI logs with `gh run view --log-failed`.
 
 - Actions are pinned to full commit SHAs with a version comment. `astral-sh/setup-uv` publishes no floating major tag, so `@v10` doesn't resolve.
 - A ruleset on `main` blocks direct pushes, force-pushes and deletion, and requires a PR whose `check` passed on a branch up to date with `main`. Work on a branch. If the job is renamed, update the required check in the ruleset too, or PRs will wait forever.
@@ -105,7 +117,7 @@ Configured in `.claude/settings.json`; scripts in `.claude/hooks/` (stdlib Pytho
 
 - **Guard (PreToolUse, Bash):** `guard_bash.py` denies commands that read `.env`, touch `evals/tickets/holdout*`, run `alembic downgrade` without `store_test`, `docker compose down -v`, `just reset-db`, or `DROP ...`. The deny reason tells Claude what to do instead; ask the user for those actions. `onFailure: block` makes a crashing guard fail closed. File tools are covered separately by `permissions.deny` (`.env`, holdout).
 - **Format on edit (PostToolUse, Edit|Write):** `format_python.py` runs `ruff format` and import sorting on the edited `.py` file. Not full `ruff check --fix`, which would delete an import added one edit before its first use.
-- **Stop gate (Stop):** `stop_gate.py` runs `just lint` and `just test -q` when the working tree is dirty; a failure blocks the end of the turn and feeds the output back. If it fails again while already continuing (`stop_hook_active`), it hands over to the user instead of looping. Keep it fast: no database checks.
+- **Stop gate (Stop):** `stop_gate.py` runs `just lint` and `just test -q` when the working tree is dirty; a failure blocks the end of the turn and feeds the output back. If it fails again while already continuing (`stop_hook_active`), it hands over to the user instead of looping. Keep it fast: database tests run only if Postgres is already up (otherwise they skip), and `migration-check` stays in CI.
 
 These guards stop mistakes, not a determined command; CI and the `main` ruleset are the backstop.
 
@@ -119,10 +131,14 @@ These guards stop mistakes, not a determined command; CI and the `main` ruleset 
 
 Record the outcome in the design doc when settled.
 - R7 scope: per refund row, per item total, or per case (the DB check is per row; split refunds or multi-item cancels can slip past it). Decide before writing `policy.py`.
-- How eval tickets reach the `tickets` table (seed vs harness), and seed dates relative to `FROZEN_NOW`. Decide before writing the seed.
 - MCP SDK support for spec 2026-07-28 (`input_required`, `server/discover`); fall back to 2025-11-25 if needed.
 
 Settled (recorded in the design doc, Nov 22):
 - Status columns: `VARCHAR` + `CHECK`, not Postgres `ENUM`.
 - Case store: a second database (`cases`) in the same Postgres container, with its own role.
 - Identity columns instead of `BIGSERIAL`; extra order-timestamp CHECKs; `refunds.rule` limited to R1–R5 by CHECK; indexes on lookup foreign keys.
+
+Settled Nov 24 (see Seed):
+- Eval tickets reach the `tickets` table through the harness (`POST /v1/admin/reset` with the run's tickets), not the seed.
+- Seed dates are offsets from `ANCHOR` = `FROZEN_NOW` = 2026-06-01 12:00 UTC.
+- The seed includes multi-quantity lines.

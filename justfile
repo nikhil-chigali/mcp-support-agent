@@ -31,6 +31,10 @@ psql db="store":
 migrate:
     cd packages/store && uv run alembic upgrade head
 
+# Wipe the dev database and load the seed world; prints where each scenario landed
+seed:
+    cd packages/store && uv run python -m store.seed
+
 # Prove migrations match the models and downgrade cleanly (runs on store_test only)
 migration-check:
     cd packages/store && STORE_DATABASE_URL={{store_test_url}} uv run alembic downgrade base
